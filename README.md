@@ -28,4 +28,4 @@ julia> include("./main_files/phasefield_sampled_mwe.jl")
 ```
 the ensemble solver will be run. Data assimilation happens automatically at the chosen time steps and results are written as .vtu files ready to be viewd in paraview.
 
-Running the 1D code works similarly, simply with the files procided in the 1d folde
+Running the 1D code works similarly, simply with the files provided in the 1d folder.
