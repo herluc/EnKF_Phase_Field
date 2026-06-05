@@ -68,15 +68,10 @@ grid = mktempdir() do dir
 end
 coords = compute_vertex_values(grid, x -> x)
 grid_data = mktempdir() do dir
-    path = joinpath(@__DIR__, "../meshing/SENS_data.msh")
+    path = joinpath(@__DIR__, "../meshing/SENS_data.msh")  ## data is generated on a finer mesh. It is needed here for computing error norms
     togrid(path)
 end
 coords_data = compute_vertex_values(grid_data, x -> x)
-
-grid_coarse = mktempdir() do dir
-    path = joinpath(@__DIR__, "../meshing/COARSETEST.msh")
-    togrid(path)
-end
 
 
 ip_tet = Lagrange{2,RefTetrahedron,1}()
@@ -91,27 +86,20 @@ projector_d = L2Projector(ipd, grid);
 projector_data_u = L2Projector(ipu, grid_data);
 ph = PointEvalHandler(grid, coords_data);
 ph_data = PointEvalHandler(grid_data, coords_data);
-ph_coarse = PointEvalHandler(grid_coarse, coords_data);
 
 dh = DofHandler(grid)
 dh_data = DofHandler(grid_data)
-dh_coarse = DofHandler(grid_coarse)
 add!(dh, :u, 2, ipu)
 add!(dh, :d, 1, ipd)
 add!(dh_data, :u, 2, ipu)
 add!(dh_data, :d, 1, ipd)
-add!(dh_coarse, :u, 2, ipu)
-add!(dh_coarse, :d, 1, ipd)
 close!(dh)
 close!(dh_data)
-close!(dh_coarse)
 renumber!(dh, DofOrder.FieldWise())
 renumber!(dh_data, DofOrder.FieldWise())
-renumber!(dh_coarse, DofOrder.FieldWise())
 
-
+# save the coordinates of each dof
 dof_coords = zeros(ndofs(dh),2)
-
 for cc in CellIterator(dh)
     cell_dofs = cc.dofs
     cell_coords = cc.coords
@@ -383,19 +371,11 @@ function solve(dh, ch, material, cv)
         push!(states_samps,deepcopy(states))
     end
 
-    refine_at = 70.0
 
-    time_vector_full = append!(collect(1.0:1:refine_at), collect(refine_at+0.1:0.1:120.0))
-    time_vector = collect(105.0:0.1:120.0)
-    time_vector = time_vector_full
-
-    data_times = [105.1,115.1]
-    save_times = [70.0,90.0,105.0,115.0]
-    load_times = []
 
     reaction_forces = ReactionForce.ReactionForcePars(time_vector_full,n_samps,dh,faceset="top",dim=2)
     error_norms = ErrorNorm.ErrorNormPars(time_vector_full,n_samps,dh,dh_data,ph,ph_data)
-    cracktips_mat = zeros(length(time_vector_full), n_samps, 2)
+
 
     for (step,timestep) in enumerate(time_vector_full)
         print("Timestep number ")
@@ -497,7 +477,7 @@ function solve(dh, ch, material, cv)
 
         end # for samples
         end #let
-        print("all samples done")
+        println("all samples done")
         end # elapsed time end
         println("Time taken: ", elapsed_time, " seconds")
         
@@ -526,18 +506,18 @@ function solve(dh, ch, material, cv)
             i_data = searchsortedfirst(time_vector, timestep)
             y = GenerateData.computeData(time_samples[step],repeat(sensor_locs,2),P_data,n_obs) # generate artificial mesaurement data
             sum_y = sum(y)
-            print("Data computed")
+            print("Sensor data extracted from ground truth!")
             
             # perform hyperparameter optimization:
             lower = [log(0.95),log(0.00002),log(0.001)] # bounds for the parameters
             upper = [log(1.05),log(0.0003),log(2.0)]
-             res = optimize(b -> KalmanFilter.logLikelihood(repeat(sensor_locs,2),y,pred_mean,pred_cov_red,n_sens,P,b),lower, upper,[log(0.999),log(0.000025),log(0.08)], NelderMead(),
-             Optim.Options(g_tol = 1e-9,
-                             iterations = 20,
-                             outer_iterations=10,
-                             show_trace = false))
+            res = optimize(b -> KalmanFilter.logLikelihood(repeat(sensor_locs,2),y,pred_mean,pred_cov_red,n_sens,P,b),lower, upper,[log(0.999),log(0.000025),log(0.08)], NelderMead(),
+            Optim.Options(g_tol = 1e-9,
+                            iterations = 20,
+                            outer_iterations=10,
+                            show_trace = false))
 
-            print("Optimizer Done")
+            print("Hyperparameter optimizer finished!")
             pars = exp.(Optim.minimizer(res))
             println("EnKF hyperparameters:")
             println(pars)
@@ -547,8 +527,7 @@ function solve(dh, ch, material, cv)
                 sample = deepcopy(a[:,i])
                 isolated_u = ScaleState.isolate_displacements(cv,dh,sample)
                 isolated_u_mean = ScaleState.isolate_displacements(cv,dh,pred_mean)
-                println(size(sample))
-                println(isolated_u[:,1234])
+      
                 u_smooth = copy(isolated_u)
                 isolated_u[1,:] = sample[1:2:Int(size(sample)[1]*(2/3))-1]#isolated_u[3,:]
                 isolated_u[2,:] = sample[2:2:Int(size(sample)[1]*(2/3))]
@@ -556,16 +535,6 @@ function solve(dh, ch, material, cv)
                 isolated_u_mean[1,:] = pred_mean[1:2:Int(size(pred_mean)[1]*(2/3))-1]#isolated_u[3,:]
                 isolated_u_mean[2,:] = pred_mean[2:2:Int(size(pred_mean)[1]*(2/3))]
                 isolated_u_mean[3,:] = isolated_u[3,:]
-                println(size(stack(isolated_u)))
-                println(size(reduce(vcat,isolated_u)))
-                println(reduce(vcat,u_smooth)[1:4])
-                println(size(sample))
-                
-                println(u_smooth[1,1:9])
-                println(collect(Iterators.flatten(zip(u_smooth[1,:],u_smooth[2,:])))[1:9])
-
-                println(dof_coords[1:9])
-                println(sample[1:9])
 
                 ### smoothing the prior with GP regression
                 coords_high_pp = findall(>(0.18), isolated_u[3,:])
@@ -574,7 +543,8 @@ function solve(dh, ch, material, cv)
                 coords_neg = findall(<(0.), phasefield_high)
                 phasefield_high[coords_neg] .= 0.0
                 phasefield_high = phasefield_high./0.9
-
+                
+                # (skip additional GP smoothing in 2D, works well without)
                 # u_smooth[1,:] = KalmanFilter.smooth2D(isolated_u_mean[1,:],isolated_u[1,:],0.25,dof_coords[1:2:Int(size(sample)[1]*(2/3))-1],coords_high_pp)
                 # u_smooth[1,:] = (phasefield_high .* u_smooth[1,:]) .+ (((phasefield_high .*(-1.0)) .+ 1.0) .* isolated_u[1,:])
 
@@ -594,7 +564,7 @@ function solve(dh, ch, material, cv)
                 print("smoothed sample nr. ")
                 println(i)
                 sample_new = deepcopy(a[:,i])
-               # quit()
+
                 println(size(collect(Iterators.flatten(zip(u_smooth[1,:],u_smooth[2,:])))))
                 
                 sample_new[1:Int(size(sample)[1]*(2/3))] = collect(Iterators.flatten(zip(u_smooth[1,:],u_smooth[2,:])))
@@ -613,7 +583,7 @@ function solve(dh, ch, material, cv)
             let pred_mean = pred_mean
             @tasks for i in range(start=1,stop=length(y_samps))
                 sample = deepcopy(a_smooth[:,i])
-                sample_inflated = pred_mean .+ 1.05 .* (sample .- pred_mean)  ### was 1.15!
+                sample_inflated = pred_mean .+ 1.05 .* (sample .- pred_mean) 
                 a_inflated[:,i] .= deepcopy(sample_inflated)
             end
             end
@@ -646,8 +616,8 @@ function solve(dh, ch, material, cv)
                 cv_local = copy(cvu), copy(cvd)
                 @views sample_pp_recalc_1 = SeparateComputation.solve_phasefield!(material, cv_local, dh, ch, shifted_sample, shifted_sample, a_old[:,i], Δt, states_samps[i], states_old_samps[i],4,1)#2,1
                 @views sample_disp_repl = SeparateComputation.solve_displacement!(material, cv_local, dh, ch, sample_pp_recalc_1, shifted_sample, a_old[:,i], Δt, states_samps[i], states_old_samps[i])
-                @views sample_pp_recalc_2 = deepcopy(sample_disp_repl)#SeparateComputation.solve_phasefield!(material, cv_local, dh, ch, sample_disp_repl, a_old[:,i], Δt, states_samps[i], states_old_samps[i],1,1)  
-                for it in 1:4
+                @views sample_pp_recalc_2 = deepcopy(sample_disp_repl)
+                for it in 1:4 #number of stagger repetitions
                     @views sample_pp_recalc_2 = SeparateComputation.solve_phasefield!(material, cv_local, dh, ch, sample_disp_repl, shifted_sample, a_old[:,i], Δt, states_samps[i], states_old_samps[i],1,1)
                     @views sample_disp_repl = SeparateComputation.solve_displacement!(material, cv_local, dh, ch, sample_pp_recalc_2, shifted_sample, a_old[:,i], Δt, states_samps[i], states_old_samps[i])
                 end
@@ -677,13 +647,13 @@ function solve(dh, ch, material, cv)
         end  
         ##
 
-        println("Save times done")
+        println("Results saved")
 
         copyto!(a_old, a)
         let states_samps = states_samps, states_old_samps = states_old_samps, a=a
         @tasks for i in range(start=1,stop=length(y_samps))
             states_old_samps[i] .= deepcopy(states_samps[i])
-            if i in [1,2,3,4,20,21,22]#30
+            if i < 30 # save first few samples to vtk for visualization
                 vtk_grid("./results/phasefield_kalman_noup_VOL_5samps-$i-$step", dh) do vtk
                     vtk_point_data(vtk, dh, a[:,i])
                     vtk_save(vtk)
@@ -718,15 +688,32 @@ function solve(dh, ch, material, cv)
     
 end
 
-n_sens = 150
+
+
+
+
+
+
+
+
+#############################################################################
+#############################################################################
+# PARAMETER SETUP AND RUN ###################################################
+#############################################################################
+
+#####
+# 1. specify the number of sensors within the domain
+#####
+n_sens = 150 
+
 Random.seed!(1213123)
 sensor_locs = Tensors.Vec{2,Float64}[]
 for i in range(start=1, step=1, stop=n_sens)
     rand_x = rand(0.5:0.001:0.875)
-    rand_y = rand(-0.2:0.001:0.2) #both 0.15
+    rand_y = rand(-0.2:0.001:0.2) 
     push!(sensor_locs,Vec((rand_x,rand_y)))
 end
-rotgrid(grd, θ) = [cos(θ) -sin(θ); sin(θ) cos(θ)] * grd
+rotgrid(grd, θ) = [cos(θ) -sin(θ); sin(θ) cos(θ)] * grd # make sure the expected crack region is covered well
 P0 = [0.5,0]
 sensor_locs_rot = rotgrid.(sensor_locs .- Ref(P0), -1.2*π/4) .+ Ref(P0)
 sensor_locs_rot_vec = Tensors.Vec{2,Float64}[]
@@ -734,37 +721,52 @@ for coord in sensor_locs_rot
     push!(sensor_locs_rot_vec,Vec((coord[1],coord[2])))
 end
 sensor_locs = sensor_locs_rot_vec
-P = ObsOperator.generateP(sensor_locs,dh,grid,cvs,ip_geo)
-P_data = ObsOperator.generateP(sensor_locs,dh_data,grid_data,cvs,ip_geo)
-
-
-
-print("P done")
+P = ObsOperator.generateP(sensor_locs,dh,grid,cvs,ip_geo;dim2D=true)
+P_data = ObsOperator.generateP(sensor_locs,dh_data,grid_data,cvs,ip_geo;dim2D=true)
+println("Observation operator successfully created!")
 jldsave("sensor_locs.jld2";sensor_locs)
 jldsave("P.jld2";P)
 
-struct Run
-    a_samp::Vector{Float64}
-end
-
-struct AllRuns
-    runs::Vector{Run}
-end
-all_a = AllRuns(Vector{Run}())
-a_samps = Vector{Float64}[]
 Random.seed!(7)#4
-y_dist_1 = Normal(-0.065,0.032)
 Random.seed!(9)
-n_samps = 100
 
+
+#####
+# 2. specify the number of ensemble members
+#####
+n_samps = 100 
+
+# sample sensor positions:
 y_dist_2 = Beta(8,8)
 x_dist_2 = Beta(8,8)
 y_samps_2 = rand(y_dist_2, n_samps).*(-0.02-(-0.11)).+(-0.11) 
 x_samps_2 = rand(x_dist_2, n_samps).*(0.62-(0.51)).+(0.51)
-
 y_samps = y_samps_2
 x_samps = x_samps_2
 n_samps = length(y_samps)
 
+
+#####
+# 3. load ground truth
+#####
 time_samples = load("./results/data_time_series_fine_test_VOL.jld2", "a_data")
+println("Ground truth loaded!")
+
+
+#####
+# 4. define time discretisation and data assimilation times
+#####
+refine_at = 70.0 #smaller time steps from this step on
+time_vector_full = append!(collect(1.0:1:refine_at), collect(refine_at+0.1:0.1:120.0)) #full time vector
+time_vector = collect(105.0:0.1:120.0) #shortened time vector for beginning at a loaded state
+time_vector = time_vector_full
+
+data_times = [105.1,115.1] # data assimilation time steps
+save_times = [70.0,90.0,105.0,115.0] # save simulation results here to load them if needed
+load_times = []
+
+
+#####
+# 5. solve the ensemble
+#####
 solve(dh, ch, material, cvs);

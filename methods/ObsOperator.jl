@@ -169,7 +169,7 @@ end
 
 
 
-function generateP(points,dh,grid,cellvalues,ip)
+function generateP(points,dh,grid,cellvalues,ip;dim2D=false)
     global K = create_sparsity_pattern(dh)
     ph = PointEvalHandler(grid,points)
     cid_list = Int64[]
@@ -179,19 +179,21 @@ function generateP(points,dh,grid,cellvalues,ip)
     for (i,point) in enumerate(MyPointIterator(ph))
         
         point === nothing && (print("point is not inside the domain!"); throw(error())) # Skip any points that weren't found
-        print(point.cid)
+        #print(point.cid)
         push!(cid_list,point.cid)
         push!(local_coord_list,point.local_coord)
         global K, f = assemble_global_obs(cellvalues, K, dh, point.cid, point.local_coord, ip, "u1");
         push!(P,f)
     end
-    # for (i,point) in enumerate(MyPointIterator(ph))
-    #     point === nothing && (print("point is not inside the domain!"); throw(error())) # Skip any points that weren't found
-    #     push!(cid_list,point.cid)
-    #     push!(local_coord_list,point.local_coord)
-    #     global K, f = assemble_global_obs(cellvalues, K, dh, point.cid, point.local_coord, ip, "u2");
-    #     push!(P,f)
-    # end
+    if dim2D==true
+        for (i,point) in enumerate(MyPointIterator(ph))
+            point === nothing && (print("point is not inside the domain!"); throw(error())) # Skip any points that weren't found
+            push!(cid_list,point.cid)
+            push!(local_coord_list,point.local_coord)
+            global K, f = assemble_global_obs(cellvalues, K, dh, point.cid, point.local_coord, ip, "u2");
+            push!(P,f)
+        end
+    end
     P_m = stack(P)
 
     P_sparse = sparse(P_m)
