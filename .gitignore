@@ -1,0 +1,47 @@
+# VTK / XML-based datasets
+*.vtk
+*.vtu
+*.vtp
+*.vts
+*.vti
+*.vtm
+*.pvtu
+*.pvd
+
+# Legacy / binary VTK
+*.vtk~
+
+# ParaView state files
+*.pvsm
+*.pvs
+
+# HDF-based simulation outputs often used with ParaView
+*.h5
+*.xdmf
+*.xmf
+
+# ParaView temp/cache files
+*.tmp
+*.temp
+*.log
+
+# Rendered outputs (optional)
+*.png
+*.jpg
+*.jpeg
+*.tif
+*.tiff
+
+# csv etc
+*.csv
+
+# pdf
+*.pdf
+
+# =========================
+# JLD2 files 
+# =========================
+
+# ignore all JLD2 files
+*.jld2
+
